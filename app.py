@@ -1,60 +1,32 @@
 import os
 import requests
+import concurrent.futures
 from flask import Flask, Response, request
 
 PORT = int(os.environ.get("PORT", 8080))
 app = Flask(__name__)
 
-# ---------- NewsAPI key (лучше вынести в переменную окружения) ----------
 NEWS_API_KEY = os.environ.get("NEWS_API_KEY", "3a09b58fa2224fe58ff9b58d5759a5ee")
 
-# ---------- Reddit ----------
-def fetch_reddit_json(subreddit: str, limit: int = 25) -> dict:
-    url = f"https://www.reddit.com/r/{subreddit}/hot.json?limit={limit}"
-    headers = {"User-Agent": "n8n-reddit-rss-bot/1.0"}
-    resp = requests.get(url, headers=headers, timeout=10)
-    resp.raise_for_status()
-    return resp.json()
+@app.route('/')
+def index():
+    return "RSS server is running. Use /hn or /news?category=technology&language=en or /<subreddit>"
 
-def build_reddit_rss(reddit_json: dict, subreddit: str, limit: int = 25) -> str:
-    items = reddit_json.get("data", {}).get("children", [])[:limit]
-    rss = '<?xml version="1.0" encoding="UTF-8"?>\n<rss version="2.0">\n<channel>\n'
-    rss += f'<title>Reddit r/{subreddit}</title>\n'
-    rss += f'<link>https://www.reddit.com/r/{subreddit}/</link>\n'
-    rss += f'<description>RSS feed for Reddit /r/{subreddit} (hot)</description>\n'
-    rss += '<language>en-us</language>\n'
-    for item in items:
-        data = item.get("data", {})
-        title = data.get("title", "No Title").replace("&", "&amp;")
-        link = f"https://www.reddit.com{data.get('permalink', '')}"
-        rss += f'<item>\n<title>{title}</title>\n<link>{link}</link>\n</item>\n'
-    rss += '</channel>\n</rss>'
-    return rss
-
-@app.route('/<subreddit>')
-def rss_feed(subreddit: str):
-    try:
-        limit = request.args.get('limit', 25, type=int)
-        data = fetch_reddit_json(subreddit, limit=limit)
-        return Response(build_reddit_rss(data, subreddit, limit), mimetype='application/xml')
-    except Exception as e:
-        return Response(str(e), status=500)
-
-# ---------- Hacker News ----------
 @app.route('/hn')
 def hackernews_rss():
     try:
-        import concurrent.futures
         top_url = "https://hacker-news.firebaseio.com/v0/topstories.json"
         resp = requests.get(top_url, timeout=10)
         resp.raise_for_status()
         story_ids = resp.json()[:20]
+
         def fetch_item(sid):
             try:
                 r = requests.get(f"https://hacker-news.firebaseio.com/v0/item/{sid}.json", timeout=5)
                 return r.json() if r.status_code == 200 else None
             except:
                 return None
+
         with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
             items = list(executor.map(fetch_item, story_ids))
         items = [i for i in items if i]
@@ -71,7 +43,7 @@ def hackernews_rss():
         return Response(rss, mimetype='application/xml')
     except Exception as e:
         return Response(f"Hacker News error: {e}", status=500)
-# ---------- NewsAPI ----------
+
 @app.route('/news')
 def newsapi_rss():
     try:
@@ -92,7 +64,7 @@ def newsapi_rss():
         rss = '<?xml version="1.0" encoding="UTF-8"?>\n<rss version="2.0">\n<channel>\n'
         rss += f'<title>NewsAPI - {category} ({language})</title>\n'
         rss += '<link>https://newsapi.org/</link>\n'
-        rss += f'<description>Top headlines from NewsAPI: category {category}, language {language}</description>\n'
+        rss += f'<description>Top headlines: {category}, {language}</description>\n'
         for art in articles:
             title = art.get('title', 'No title').replace('&', '&amp;')
             link = art.get('url', '')
@@ -105,10 +77,30 @@ def newsapi_rss():
     except Exception as e:
         return Response(f"NewsAPI error: {e}", status=500)
 
-# ---------- Root ----------
-@app.route('/')
-def index():
-    return "Reddit + Hacker News + NewsAPI RSS server is running. Use /<subreddit> or /hn or /news"
+@app.route('/<subreddit>')
+def rss_feed(subreddit: str):
+    try:
+        limit = request.args.get('limit', 25, type=int)
+        url = f"https://www.reddit.com/r/{subreddit}/hot.json?limit={limit}"
+        headers = {"User-Agent": "n8n-reddit-rss-bot/1.0"}
+        resp = requests.get(url, headers=headers, timeout=10)
+        resp.raise_for_status()
+        data = resp.json()
+
+        items = data.get("data", {}).get("children", [])[:limit]
+        rss = '<?xml version="1.0" encoding="UTF-8"?>\n<rss version="2.0">\n<channel>\n'
+        rss += f'<title>Reddit r/{subreddit}</title>\n'
+        rss += f'<link>https://www.reddit.com/r/{subreddit}/</link>\n'
+        rss += f'<description>RSS for /r/{subreddit}</description>\n'
+        for item in items:
+            d = item.get("data", {})
+            title = d.get("title", "No Title").replace("&", "&amp;")
+            link = f"https://www.reddit.com{d.get('permalink', '')}"
+            rss += f'<item>\n<title>{title}</title>\n<link>{link}</link>\n</item>\n'
+        rss += '</channel>\n</rss>'
+        return Response(rss, mimetype='application/xml')
+    except Exception as e:
+        return Response(str(e), status=500)
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=PORT)
