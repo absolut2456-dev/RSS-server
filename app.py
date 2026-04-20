@@ -71,8 +71,6 @@ def hackernews_rss():
         return Response(rss, mimetype='application/xml')
     except Exception as e:
         return Response(f"Hacker News error: {e}", status=500)
-    except Exception as e:
-        return Response(f"Hacker News error: {e}", status=500)
 # ---------- NewsAPI ----------
 @app.route('/news')
 def newsapi_rss():
