@@ -44,22 +44,25 @@ def rss_feed(subreddit: str):
 @app.route('/hn')
 def hackernews_rss():
     try:
+        import concurrent.futures
         top_url = "https://hacker-news.firebaseio.com/v0/topstories.json"
         resp = requests.get(top_url, timeout=10)
         resp.raise_for_status()
-        story_ids = resp.json()[:30]
-
-        items = []
-        for sid in story_ids:
-            item_url = f"https://hacker-news.firebaseio.com/v0/item/{sid}.json"
-            item_resp = requests.get(item_url, timeout=10)
-            if item_resp.status_code == 200:
-                items.append(item_resp.json())
+        story_ids = resp.json()[:20]
+        def fetch_item(sid):
+            try:
+                r = requests.get(f"https://hacker-news.firebaseio.com/v0/item/{sid}.json", timeout=5)
+                return r.json() if r.status_code == 200 else None
+            except:
+                return None
+        with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
+            items = list(executor.map(fetch_item, story_ids))
+        items = [i for i in items if i]
 
         rss = '<?xml version="1.0" encoding="UTF-8"?>\n<rss version="2.0">\n<channel>\n'
         rss += '<title>Hacker News Top Stories</title>\n'
         rss += '<link>https://news.ycombinator.com/</link>\n'
-        rss += '<description>Top 30 stories from Hacker News</description>\n'
+        rss += '<description>Top stories from Hacker News</description>\n'
         for item in items:
             title = item.get('title', 'No Title').replace('&', '&amp;')
             url = item.get('url', f"https://news.ycombinator.com/item?id={item.get('id')}")
@@ -68,7 +71,8 @@ def hackernews_rss():
         return Response(rss, mimetype='application/xml')
     except Exception as e:
         return Response(f"Hacker News error: {e}", status=500)
-
+    except Exception as e:
+        return Response(f"Hacker News error: {e}", status=500)
 # ---------- NewsAPI ----------
 @app.route('/news')
 def newsapi_rss():
