@@ -10,13 +10,19 @@ NEWS_API_KEY = os.environ.get("NEWS_API_KEY", "3a09b58fa2224fe58ff9b58d5759a5ee"
 
 @app.route('/')
 def index():
-    return "RSS server is running. Use /hn or /news?category=technology&language=en or /<subreddit>"
+    return """RSS Server endpoints:
+/hn - Hacker News top stories
+/news?category=technology&language=en - NewsAPI headlines
+/bbcworld - BBC World News
+/techcrunch - TechCrunch
+/ign - IGN Gaming News
+/nasa - NASA News
+"""
 
 @app.route('/hn')
 def hackernews_rss():
     try:
-        top_url = "https://hacker-news.firebaseio.com/v0/topstories.json"
-        resp = requests.get(top_url, timeout=10)
+        resp = requests.get("https://hacker-news.firebaseio.com/v0/topstories.json", timeout=10)
         resp.raise_for_status()
         story_ids = resp.json()[:20]
 
@@ -42,12 +48,12 @@ def hackernews_rss():
         rss += '</channel>\n</rss>'
         return Response(rss, mimetype='application/xml')
     except Exception as e:
-        return Response(f"Hacker News error: {e}", status=500)
+        return Response(f"HN error: {e}", status=500)
 
 @app.route('/news')
 def newsapi_rss():
     try:
-        category = request.args.get('category', 'science')
+        category = request.args.get('category', 'technology')
         language = request.args.get('language', 'en')
         page_size = request.args.get('pageSize', 20, type=int)
 
@@ -68,39 +74,50 @@ def newsapi_rss():
         for art in articles:
             title = art.get('title', 'No title').replace('&', '&amp;')
             link = art.get('url', '')
-            desc = art.get('description', '')
-            if desc:
-                desc = desc.replace('&', '&amp;')
+            desc = art.get('description', '') or ''
+            desc = desc.replace('&', '&amp;')
             rss += f'<item>\n<title>{title}</title>\n<link>{link}</link>\n<description>{desc}</description>\n</item>\n'
         rss += '</channel>\n</rss>'
         return Response(rss, mimetype='application/xml')
     except Exception as e:
         return Response(f"NewsAPI error: {e}", status=500)
 
-@app.route('/<subreddit>')
-def rss_feed(subreddit: str):
+def proxy_rss(url: str):
     try:
-        limit = request.args.get('limit', 25, type=int)
-        url = f"https://www.reddit.com/r/{subreddit}/hot.json?limit={limit}"
-        headers = {"User-Agent": "n8n-reddit-rss-bot/1.0"}
-        resp = requests.get(url, headers=headers, timeout=10)
+        headers = {"User-Agent": "Mozilla/5.0 (compatible; RSSBot/1.0)"}
+        resp = requests.get(url, headers=headers, timeout=15)
         resp.raise_for_status()
-        data = resp.json()
-
-        items = data.get("data", {}).get("children", [])[:limit]
-        rss = '<?xml version="1.0" encoding="UTF-8"?>\n<rss version="2.0">\n<channel>\n'
-        rss += f'<title>Reddit r/{subreddit}</title>\n'
-        rss += f'<link>https://www.reddit.com/r/{subreddit}/</link>\n'
-        rss += f'<description>RSS for /r/{subreddit}</description>\n'
-        for item in items:
-            d = item.get("data", {})
-            title = d.get("title", "No Title").replace("&", "&amp;")
-            link = f"https://www.reddit.com{d.get('permalink', '')}"
-            rss += f'<item>\n<title>{title}</title>\n<link>{link}</link>\n</item>\n'
-        rss += '</channel>\n</rss>'
-        return Response(rss, mimetype='application/xml')
+        return Response(resp.content, mimetype='application/xml')
     except Exception as e:
-        return Response(str(e), status=500)
+        return Response(f"Error: {e}", status=500)
+
+@app.route('/bbcworld')
+def bbc_world():
+    return proxy_rss("http://feeds.bbci.co.uk/news/world/rss.xml")
+
+@app.route('/bbctech')
+def bbc_tech():
+    return proxy_rss("http://feeds.bbci.co.uk/news/technology/rss.xml")
+
+@app.route('/techcrunch')
+def techcrunch():
+    return proxy_rss("https://techcrunch.com/feed/")
+
+@app.route('/ign')
+def ign():
+    return proxy_rss("https://feeds.ign.com/ign/all")
+
+@app.route('/nasa')
+def nasa():
+    return proxy_rss("https://www.nasa.gov/rss/dyn/breaking_news.rss")
+
+@app.route('/verge')
+def verge():
+    return proxy_rss("https://www.theverge.com/rss/index.xml")
+
+@app.route('/wired')
+def wired():
+    return proxy_rss("https://www.wired.com/feed/rss")
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=PORT)
